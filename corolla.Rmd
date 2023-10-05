@@ -1,0 +1,359 @@
+---
+title: "corolla"
+author: "Yuan Yao"
+date: "12/4/2020"
+output: pdf_document
+---
+
+```{r}
+mydata<- read.csv("/Users/amelie/Desktop/project2/ToyotaCorolla.csv")
+head(mydata)
+summary.data.frame(mydata)
+dim(mydata)
+names(mydata)
+str(mydata)
+#plot(mydata)
+mydata<-data.frame(mydata)
+library(reshape)
+mydata<- rename(mydata,c(Price="y",Age="x1",KM="x2",FuelType="x3",HP="x4",MetColor="x5",Automatic="x6",CC="x7",Doors="x8",Weight="x9"))
+mydata$x3Diesel <- ifelse(mydata$x3=="Diesel", 1, 0)
+mydata$x3Petrol <- ifelse(mydata$x3=="Petrol", 1, 0)
+mydata1 <- subset(mydata,select=-c(x3))
+head(mydata1)
+par(mfrow=c(3,4))
+  plot(mydata1$x1,mydata1$y, xlab="Age",ylab = "Price")
+  plot(mydata1$x2,mydata1$y, xlab="Km",ylab = "Price")
+  plot(mydata1$x3Diesel,mydata1$y, xlab="FuelTypeDiesel",ylab = "Price")
+  plot(mydata1$x3Petrol,mydata1$y, xlab="FuelPetrol",ylab = "Price")
+  plot(mydata1$x4,mydata1$y, xlab="HP",ylab = "Price")
+   plot(mydata1$x5,mydata1$y, xlab="MetColor",ylab = "Price")
+    plot(mydata1$x6,mydata1$y, xlab="Automatic",ylab = "Price")
+     plot(mydata1$x7,mydata1$y, xlab="CC",ylab = "Price")
+      plot(mydata1$x8,mydata1$y, xlab="Doors",ylab = "Price")
+       plot(mydata1$x9,mydata1$y, xlab="Weight",ylab = "Price")
+```
+
+```{r}
+## data split
+train_size <-round(nrow(mydata1)* 0.7)   # the size of training dataset (70%)
+test_size <- nrow(mydata1)-train_size     # the size of  test data set 
+training_sample <-sample(nrow(mydata1), train_size, replace = FALSE, set.seed(1)) # select training data set
+##traing data
+mydata2 <- mydata1[training_sample, ]
+
+##test data
+mydataT <-mydata1[-training_sample, ]
+
+```
+
+
+
+```{r}
+########check multicolinearity(use training data)
+head(mydata2,10)
+##CHECK
+##CHECK
+##CHECK
+pairs(mydata2[,-1])
+C <- cor(mydata2[,-1])
+C
+#compute variance inflation factors(VIF)
+diag(solve(C))
+## condition number
+kappa(C,exact = TRUE)
+## full model analysis 
+mymodel<-lm(y ~ ., mydata2)
+summary(mymodel)
+
+```
+
+```{r}
+## full model analysis vs ridge regression vs LASSO
+library(MASS)
+X <- as.matrix(mydata2[,-1])
+y <- mydata2[,1]
+X.scale <- scale(X)
+y.scale <- y - mean(y) 
+#Let's fit the Ridge Regression model using the function `lm.ridge` from MASS.
+plot(lm.ridge(y.scale~X.scale+0, lambda=seq(0, 1, 0.0001)))
+abline(0,0,lty=1,lwd=2,col="black")
+title(main = "Ridge trace for Corolla data",cex.main=3)
+select(lm.ridge(y.scale~X.scale+0, lambda=seq(0, 2, 0.0001)))
+##Refit model with best lambda
+ridge.model = lm.ridge(y.scale~X.scale+0,lambda=.9174)
+beta1 <- coef(ridge.model)
+beta1
+ridge.SSRes <- sum((y.scale - X.scale %*% beta1)^2)
+ridge.SSRes
+MSEr<-ridge.SSRes/(length(mydata2$y)-10)#1780072962
+MSEr
+ridge.SST <- sum(y.scale^2)
+ridge.R2 <- 1 - ridge.SSRes/ridge.SST
+ridge.R2  ##0.873149 vs 0.8732
+##OLS model (how to know ridge is good)???
+OLS.model <- lm(y.scale~X.scale+0)
+summary(OLS.model)
+OLS.SSRes <- sum(OLS.model$residuals^2)
+OLS.SSRes #1779983383
+MSEO<-OLS.SSRes/(length(mydata2$y)-10)
+MSEO
+ridge.SSRes / OLS.SSRes 
+```
+
+```{r}
+##########Lasso regression
+library(glmnet)
+X <- as.matrix(mydata2[,-1])
+y <- mydata2[,1] 
+lambdas_to_try<-10^seq(2, -10, by=-0.1)
+lasso_cv <- cv.glmnet(X,y,alpha = 1,lambda=lambdas_to_try,
+                      standardize = TRUE, nfolds = 10)
+best_lam<-lasso_cv$lambda.min
+best_lam
+lasso_best<-glmnet(X,y, alpha = 1,lambda=best_lam)
+plot(lasso_cv)
+
+coef(lasso_best)
+x_test<-as.matrix(mydataT[,-1])
+y_test<-as.matrix(mydataT[,1])
+####predict
+preds<-predict.glmnet(lasso_best,s=best_lam,newx=x_test)
+rss<-sum((preds-y_test)^2)
+rss
+MSEL<-rss/(length(mydata2$y)-10)
+MSEL
+tss<-sum((y_test-mean(y_test))^2)
+
+tss
+rsq<-1-(rss/tss)
+rsq
+                  
+#
+```
+
+```{r}
+######################## variable select
+##automatical stepwise regression (AIC-based) (a lower AIC or BIC value indicates a better fit)
+baseModel<-lm(y~1,data=mydata2)
+fullModel<-lm(y~.,data=mydata2)
+step(baseModel, scope=list(upper=fullModel,lower=~1),
+     direction="both", k=2)
+mydata3<-mydata2[,c(1,2,3,4,7,9,10,11)]##training data(select variable)
+C <- cor(mydata3[,-1])
+C
+fullModel<-lm(y~.,mydata2)
+summary(fullModel)
+#compute variance inflation factors(VIF)
+diag(solve(C))
+## condition number
+kappa(C,exact = TRUE)
+mydata4<-mydata2[,c(1,2,3,4,7,9,10)]
+C <- cor(mydata4[,-1])
+C
+#compute variance inflation factors(VIF)
+diag(solve(C))
+## condition number
+kappa(C,exact = TRUE)
+mydata5<-mydata2[,c(1,2,3,4,7,9)]
+C <- cor(mydata5[,-1])
+C
+#compute variance inflation factors(VIF)
+diag(solve(C))
+## condition number
+kappa(C,exact = TRUE)
+mydata5<-mydata2[,c(1,2,3,4,7,9)]
+C <- cor(mydata5[,-1])
+C
+#compute variance inflation factors(VIF)
+diag(solve(C))
+## condition number
+kappa(C,exact = TRUE)
+######################
+
+fitmodel1<-lm(y~ x1 + x9 + x2 + x4, data = mydata2)
+summary(fitmodel1)
+fitmodel2<-lm(y ~ x1 + x9 + x2 + x4 + x7, data=mydata2)
+summary(fitmodel2)
+fitmodel3<- lm(y ~ x1 + x9 + x2 + x4 + x7 + x3Diesel, data= mydata2)
+summary(fitmodel3)
+fitmodel4<-lm(y ~ x1 + x9 + x2 + x4 + x7 + x3Diesel + x3Petrol,data= mydata2)
+summary(fitmodel4)
+fitmodel<-lm( y ~ x1 + x9 + x2 + x4 + x7 + x3Diesel + x3Petrol + x6, data = mydata2)
+summary(fitmodel)
+
+###choose model fitmodel4(select varible model)
+fitmodel4<-lm(y ~ x1 + x9 + x2 + x4 + x7 + x3Diesel + x3Petrol,data= mydata2)
+summary(fitmodel4)
+```
+
+
+```{r}
+##ridge regression
+X <- as.matrix(mydata3[,-1])
+y <- as.matrix(mydata3[,1])
+X.scale <- scale(X)
+y.scale <- y - mean(y) 
+##########################Let's fit the Ridge Regression model using the function `lm.ridge` from MASS.
+plot(lm.ridge(y.scale~X.scale+0, lambda=seq(0, 5, 0.0001)))
+abline(0,0,lty=1,lwd=2,col="black")
+title(main = "Ridge trace for Corolla data",cex.main=3)
+select(lm.ridge(y.scale~X.scale+0, lambda=seq(0, 5, 0.0001)))
+#Refit model with best lambda
+ridge.model = lm.ridge(y.scale~X.scale+0,lambda=0.9233)
+beta1 <- coef(ridge.model)
+beta1
+ridge.SSRes <- sum((y.scale - X.scale %*% beta1)^2)
+ridge.SSRes##1789944419
+ridge.SST <- sum(y.scale^2)
+ridge.R2 <- 1 - ridge.SSRes/ridge.SST
+ridge.R2##0.8724462 VS 0.8725
+##OLS model (how to know ridge is good????????????????????)
+OLS.model <- lm(y.scale~X.scale+0)
+summary(OLS.model)
+OLS.SSRes <- sum(OLS.model$residuals^2)
+OLS.SSRes## 1789854139
+ridge.SSRes / OLS.SSRes # 1.00005
+```
+
+```{r}
+###assumption checking(residual plot and normal QQ plot)
+#####residual plot
+# qq plot
+qqnorm(rstudent(fitmodel4))##(errors normally distributed)
+abline(0,1,col="red")
+
+
+# plot studentized residuals against fitted values (constant variance check)
+t<- rstudent(fitmodel4) # externally studentized residuals
+plot(fitted.values(fitmodel4), t, xlab="fitted values", ylab="studentized residuals", pch=16, col = "blue", main="residual plot against fitted values")
+
+#plot raw residuals against regressors (check linearity between response and regressors)
+e<- residuals(fitmodel4) # raw residuals
+plot(mydata2$x1, e, xlab="x1", ylab="t", pch=16, 
+     main="residual plot against x1")
+plot(mydata2$x2, e, xlab="x2", ylab="t", pch=16, 
+     main="residual plot against x2")
+plot(mydata2$x4, e, xlab="x4", ylab="t", pch=16, 
+     main="residual plot against x4")
+plot(mydata2$x7, e, xlab="x7", ylab="t", pch=16, 
+     main="residual plot against x7")
+plot(mydata2$x9, e, xlab="x9", ylab="t", pch=16, 
+     main="residual plot against x9")
+
+boxplot(mydata2$x3Petrol, e, xlab="x3Petrol", ylab="t", pch=16, 
+     main="residual plot against xPetrol")
+boxplot(mydata2$x3Diesel, e, xlab="x3Diesel", ylab="t", pch=16, 
+     main="residual plot against x3Diesel")
+
+```
+```{r}
+######Check outliners&influential point (select variable model)
+n <- length(mydata2$y)
+k <- 8
+#plot residual vs leverage
+plot(hatvalues(fitmodel4),rstudent(fitmodel4),
+     xlab="hat values", ylab="studentized residuals", 
+     pch=16, main="Residual vs leverage", 
+     cex=1, cex.main=3, cex.lab=2.5, cex.axis=2.5)
+abline(v=2*(k+1)/n, col="red",lwd=3, lty=2)
+abline(h=-3, col="red",lwd=3, lty=2)
+abline(h=3, col="red",lwd=3, lty=2)
+
+#plot cook's distance
+plot(cooks.distance(fitmodel4), xlab="index", ylab="D_i", 
+     pch=16, main="Cook's distance", 
+     cex=1, cex.main=3, cex.lab=2.5, cex.axis=2.5)
+abline(h=1, col="red",lwd=3, lty=2)
+
+plot(fitmodel4,4)
+plot(fitmodel4,5)
+
+
+#DFBETA
+
+#plot(dfbetas(fitmodel4)[,2], xlab="index", ylab="dfbeta_1", 
+     #pch=16, main="DFBETAS_1", 
+    # cex=2, cex.main=3, cex.lab=2.5, cex.axis=2.5)
+#abline(h=2/sqrt(n), col="red",lwd=3, lty=2)
+#abline(h=-2/sqrt(n), col="red",lwd=3, lty=2)
+
+#DFFIT
+#plot(dffits(fitmodel4), xlab="index", ylab="dffits", 
+     #pch=16, main="DFFITS", 
+     #cex=2, cex.main=3, cex.lab=2.5, cex.axis=2.5)
+#abline(h=2*sqrt((k+1)/n), col="red",lwd=3, lty=2)
+#abline(h=-2*sqrt((k+1)/n), col="red",lwd=3, lty=2)
+
+#COVRATIO
+#plot(covratio(fitmodel4), xlab="index", ylab="covratio",
+     #pch=16, main="COVRATIO", 
+     #cex=2, cex.main=3, cex.lab=2.5, cex.axis=2.5)
+#abline(h=1+3*(k+1)/n, col="red",lwd=3, lty=2)
+#abline(h=1-3*(k+1)/n, col="red",lwd=3, lty=2)
+
+#influence.measures(fitmodel4)
+```
+
+```{r}
+##modeling transformation
+### Regression diagonotics & transformed model(box-cox method)
+library(car)
+library(carData)
+ncvTest(fitmodel4)###nonconstant variance
+spreadLevelPlot(fitmodel4)
+##Suggested power transformation:  0.4494931 
+newfitmodel<-lm(sqrt(y)~x1 + x9 + x2 + x4 + x7 + x3Diesel + x3Petrol,data= mydata2)
+plot(newfitmodel)
+##check linearity
+crPlots(newfitmodel, smooth=FALSE)
+boxTidwell(sqrt(y)~x1 + x9 + x2 + x4 + x7,~x3Diesel + x3Petrol,data= mydata2)
+newfittedmodel<-lm (sqrt(y)~sqrt(x1)+I(x9^-5) + x2 + x4 + I(x7^-21)+ x3Diesel+ x3Petrol,data= mydata2)
+summary(newfittedmodel)
+##check constant variance, errors normally distributed,influential point &leverage point)
+plot(newfittedmodel)
+plot(newfittedmodel, which=4, cook.levels=1) ## (no influential point)
+n <- length(mydata2$y)
+k <- 8
+#plot residual vs leverage
+plot(hatvalues(newfittedmodel),rstudent(newfittedmodel),
+     xlab="hat values", ylab="studentized residuals", 
+     pch=16, main="Residual vs leverage", 
+     cex=1, cex.main=3, cex.lab=2.5, cex.axis=2.5)
+abline(v=2*(k+1)/n, col="red",lwd=3, lty=2)
+abline(h=-3, col="red",lwd=3, lty=2)
+abline(h=3, col="red",lwd=3, lty=2)
+#plot cook's distance
+plot(cooks.distance(newfittedmodel), xlab="index", ylab="D_i", 
+     pch=16, main="Cook's distance", 
+     cex=1, cex.main=3, cex.lab=2.5, cex.axis=2.5,ylim = c(0,1))
+abline(h=1, col="red",lwd=3, lty=2)
+
+
+```
+```{r}
+###model fitting test
+##newfittedmodel is final model
+
+
+#test it by the testing data 
+pred_test= predict(newfittedmodel, mydataT)
+pred_price=pred_test^2
+#calculate MSE and R^2
+RES<-(mydataT$y - pred_price)
+SSRes <- sum((mydataT$y - pred_price)^2)
+SSRes
+MSE<- (SSRes)/(nrow(mydataT)-7)
+MSE
+SST <- sum((mydataT$y-mean(mydataT$y))^2)
+R2 <- 1 - SSRes/SST
+R2
+hist(RES, breaks=20, freq=FALSE, xlab="Studentized Residuals", main="Distribution of Errors")
+curve(dnorm(x, mean=mean(RES), sd=sd(RES)), add=TRUE, col= "blue", lwd=2)
+lines(density(RES)$x, density(RES)$y, col= "red", lwd=2, lty=2)
+legend("topright", legend=c("Normal Curve", "Kernel Density Curve"), lty=1:2, col=c("blue", "red"), cex=.7)
+```
+
+
+
+
+
